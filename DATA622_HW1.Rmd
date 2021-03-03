@@ -1,0 +1,467 @@
+---
+title: "DATA622_HW1"
+author: "IR"
+date: "2/7/2021"
+output: 
+ html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r comment=FALSE, message=FALSE}
+library(palmerpenguins)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(mlbench)
+library(MASS)
+library(pROC)
+library(stringr)
+library(ggplot2)
+```
+
+
+
+# 1. Logistic Regression with a binary outcome. (40)
+
+
+## a. 
+The penguin dataset has ‘species’ column. Please check how many categories you have in the species column. Conduct whatever data manipulation you need to do to be able to build a logistic regression with binary outcome. Please explain your reasoning behind your decision as you manipulate the outcome/dependent variable (species).
+
+There are three categories in the species column. From the summary statistic, there are missing values in the dataset, being displayed as NA’s and should be removed. Species is the binary dependent variable in this dataset with categories Adelie, Chinstrap and Gentoo. When the dependent variable has more than two categories, then it is a multinomial logistic regression. In this case we are trying to build a logistic regression with binary outcome therefore one category has to be removed. 
+
+```{r}
+summary(penguins)
+```
+
+I will remove the species with the lowest quantity which is Chinstrap.
+```{r}
+newdata <-na.omit(penguins)
+newdatat <- newdata %>% filter(species !="Chinstrap")
+glimpse(newdatat)
+```
+
+## b. 
+Please make sure you are evaluating the independent variables appropriately in deciding which ones should be in the model.
+
+Non-numeric columns, `Island` and `Sex` were removed along with `Year`. I reordered the columns to have the binary dependent variable, species as the last column.
+```{r}
+newdata2 <-newdatat [, c(3,4,5,6,1)]
+#newdata2 <-newdatat [, c(3,6,1)]
+
+pnewdata <-newdata2 %>%
+  mutate_all(str_trim) %>%
+  mutate(bill_length_mm = bill_length_mm %>% as.numeric()) %>%
+  mutate(bill_depth_mm = bill_depth_mm %>% as.numeric()) %>%
+  mutate(flipper_length_mm= flipper_length_mm %>% as.numeric()) %>%
+  mutate(body_mass_g= body_mass_g %>% as.numeric()) %>%
+  arrange(body_mass_g) %>%
+  mutate_if(is.character,as.factor)
+glimpse(pnewdata)
+```
+
+There are now four independent variables as indicated in the Descriptive statistics.
+
+Changed data frame to matrix to handle the following error: Error in hist.default(newdata2[, i], main = colnames(newdata2)[i], xlab = colnames(newdata2)[i], : 'x' must be numeric
+```{r}
+#newdata3 <-as.matrix(sapply(newdata2, as.numeric))
+#head(newdata3)
+pnewdata2 <-as.matrix(sapply(pnewdata, as.numeric))
+```
+
+Analyze the distribution of each independent variable
+```{r}
+par(mfrow = c(2,2))
+for( i in 1:4){
+  hist(pnewdata2[,i], main = colnames(pnewdata)[i],xlab=colnames(pnewdata)[i], col = 'yellow')
+}
+```
+For continuous independent variables, we can get more clarity on the distribution by analyzing it w.r.t. dependent variable.
+```{r}
+par(mfrow = c(2,2))
+boxplot(bill_length_mm~species, ylab="Bill Length (mm)", xlab= "Species", col="light blue",data = pnewdata)
+boxplot(bill_depth_mm~species, ylab="Bill Depth (mm)", xlab= "Species", col="light blue",data = pnewdata)
+boxplot(flipper_length_mm~species, ylab="Flipper Length (mm)", xlab= "Species", col="light blue",data = pnewdata)
+boxplot(body_mass_g~species, ylab="Body Mass (g)", xlab= "Species", col="light blue",data = pnewdata)
+```
+## c.
+Provide variable interpretations in your model.
+```{r}
+logit_1 <- glm(species~., family = binomial,data = pnewdata)
+```
+
+
+Analysis of Model Summary
+```{r}
+
+summary(logit_1)
+```
+For continuous variables, the interpretation is as follows:
+For every one unit increase in bill length(mm), the log odds of being species ‘Adelie’(versus being Species ‘Gentoo’) decreases by 1.706.
+Similarly, for one unit increase in bill depth(mm), the log odds of being species ‘Adelie’(versus being Species ‘Gentoo’) decreases by 1.167.
+For every one unit increase in flipper_length(mm), the log odds of being species ‘Adelie’(versus being Species ‘Gentoo’) increases by 1.265.
+Similarly, for one unit increase in body_mass(g), the log odds of being species ‘Adelie’(versus being Species ‘Gentoo’) increases by 1.848.
+
+The model ‘logit_1', might not be the best model with the given set of independent variables.
+There are multiple methodologies for variable selection. I will explore only the ‘stepAIC’ function.
+The ‘stepAIC’ function in R performs a stepwise model selection with an objective to minimize the AIC value.
+
+```{r}
+logit_2 <- stepAIC(logit_1)
+```
+```{r}
+summary(logit_2)
+```
+After implementing ‘stepAIC’ function, I am now left with two independent variables — bill depth(mm) and flipper length(mm). Of all the possible models, this model (logit_2) has the minimum AIC value and these variables are highly significant.
+
+
+```{r}
+summary(logit_2$fitted.values)
+```
+
+```{r}
+newdata2$Predict <- ifelse(logit_2$fitted.values >0.5,"pos","neg")
+```
+
+
+```{r}
+logit_1$aic
+logit_2$aic
+```
+
+# 2. Provide: AUC, Accuracy, TPR, FPR, TNR, FNR (20)
+
+Gentoo Confusion Matrix was zero so I will adjust the data set.
+
+```{r}
+pennewdata <-na.omit(penguins)%>% filter(species !="Chinstrap")
+#newdata2 <-newdatat [, c(3,4,5,6,1)]
+pennewdata2 <-pennewdata [, c(3,6,1)]
+pennewdata3 <-pennewdata2 %>%
+  mutate_all(str_trim) %>%
+  mutate(bill_length_mm = bill_length_mm %>% as.numeric()) %>%
+  #mutate(bill_depth_mm = bill_depth_mm %>% as.numeric()) %>%
+  #mutate(flipper_length_mm= flipper_length_mm %>% as.numeric()) %>%
+  mutate(body_mass_g= body_mass_g %>% as.numeric()) %>%
+  #arrange(body_mass_g) %>%
+  mutate_if(is.character,as.factor)
+glimpse(pennewdata3)
+```
+Train/Test Split
+```{r}
+library(tidymodels)
+df_split <- initial_split(pennewdata3, prop=0.7)
+df_train <- training(df_split)
+df_test <- testing(df_split)
+```
+
+Logistic regression model
+```{r}
+lr_model <- logistic_reg() %>%
+  # using model classification
+  set_mode('classification') %>%
+  # use glm function
+  set_engine('glm') %>%
+  #fit training data
+  fit(species ~ ., df_train)
+```
+
+Prediction on Training Data
+```{r}
+lr_train_pred <- lr_model %>% 
+  predict(df_train) %>%
+  # rename the prediction column
+  mutate(prediction = `.pred_class`) %>%
+  # merge the prediction result back to training data set
+  bind_cols(df_train) 
+```
+
+Confusion Matrix is a tabular representation of Observed vs Predicted values. It helps to quantify the efficiency (or accuracy) of the model.
+```{r}
+lr_train_cm <- lr_train_pred %>% 
+  #use only prediction values and actual label
+  dplyr::select(prediction, species) %>%
+  #construct confusion matrix
+  table() %>%
+  #display as matrix
+  as.matrix()
+lr_train_cm
+```
+Accuracy is .946.
+```{r}
+lr_train_pred %>%
+  metrics(truth = species, estimate = prediction)
+```
+
+
+```{r}
+tp<-lr_train_cm[1,1]
+fp<-lr_train_cm[1,2]
+fn<-lr_train_cm[2,1]
+tn<-lr_train_cm[2,2]
+
+accuracy <- (tp+tn)/(tp+tn+fp+fn) #accuracy=(TP+TN/P+N)
+tpr <- tp/(tp+fn) #TPR=TP/(TP+FN)
+fpr <- fp/(fp+tn) #FPR=FP/(FP+TN)
+tnr <- tn/(tn+fp) #TNR=TN/(TN+FP)
+fnr <- fn/(fn+tp) #FNR=FN/(FN+TP)
+
+
+lr_pred_prob_tr <- lr_train_pred %>%
+  cbind(predict(lr_model, df_train, type='prob'))
+lr_pred_prob_tr
+lr_pred_prob_tr %>%
+  roc_curve(species, c(.pred_Adelie)) %>%
+  autoplot()
+```
+```{r message=FALSE, comment=FALSE}
+auc <- lr_pred_prob_tr %>%
+  roc_auc(species, c(.pred_Adelie)) %>%
+  .[1,3] %>%
+  as.numeric()
+
+train_r1 <- data.frame(AUC = auc, 
+                       ACCURACY = accuracy, 
+                       TPR = tpr, 
+                       FPR = fpr, 
+                       TNR = tnr, 
+                       FNR = fnr) 
+ 
+library(kableExtra)
+train_r1 %>%
+  kable(caption = 'Training')
+```
+
+```{r}
+lr_test_pred <- lr_model %>% 
+  #make prediction on testing data
+  predict(df_test) %>%
+  # rename the prediction column
+  mutate(prediction = `.pred_class`) %>%
+  # merge the prediction result back to training data set
+  bind_cols(df_test)
+```
+
+
+```{r}
+lr_test_cm <- lr_test_pred %>% 
+  #use only prediction values and actual label
+  dplyr::select(prediction, species) %>%
+  #construct confusion matrix
+  table() %>%
+  #display as matrix
+  as.matrix()
+lr_test_cm
+```
+```{r}
+lr_test_pred %>%
+  metrics(truth = species, estimate = prediction)
+```
+```{r}
+tp<-lr_test_cm[1,1]
+fp<-lr_test_cm[1,2]
+fn<-lr_test_cm[2,1]
+tn<-lr_test_cm[2,2]
+
+accuracy <- (tp+tn)/(tp+tn+fp+fn) #accuracy=(TP+TN/P+N)
+tpr <- tp/(tp+fn) #TPR=TP/(TP+FN)
+fpr <- fp/(fp+tn) #FPR=FP/(FP+TN)
+tnr <- tn/(tn+fp) #TNR=TN/(TN+FP)
+fnr <- fn/(fn+tp) #FNR=FN/(FN+TP)
+
+lr_pred_prob_te <- lr_test_pred %>%
+  cbind(predict(lr_model, df_test, type='prob'))
+lr_pred_prob_te %>%
+  roc_curve(species, c(.pred_Adelie)) %>%
+  autoplot()
+```
+```{r}
+auc <- lr_pred_prob_te %>%
+  roc_auc(species, c(.pred_Adelie)) %>%
+  .[1,3] %>%
+  as.numeric()
+
+test_r1 <- data.frame(AUC = auc, 
+                       ACCURACY = accuracy, 
+                       TPR = tpr, 
+                       FPR = fpr, 
+                       TNR = tnr, 
+                       FNR = fnr)
+test_r1 %>%
+  kable(caption = 'Testing')
+```
+
+# 3. Multinomial Logistic Regression. (40)
+
+
+```{r}
+unique(penguins[c("species")])
+```
+
+## a. 
+
+Please fit it a multinomial logistic regression where your outcome variable is ‘species’. 
+
+From the summary statistic, there are missing values in the dataset, being displayed as NA’s and should be removed. Species has categories Adelie, Chinstrap and Gentoo. When the dependent variable has more than two categories, then it is a multinomial logistic regression. 
+
+```{r}
+summary(penguins)
+```
+
+```{r}
+mnewdata <-na.omit(penguins)
+summary(mnewdata)
+```
+
+Non-numeric columns, `Island` and `Sex` were removed along with `Year`. I reordered the columns to have the binary dependent variable, species as the last column.
+```{r}
+mnewdata1 <-mnewdata[, c(3,4,5,6,1)]
+```
+
+There are now four independent variables as indicated in the Descriptive statistics.
+```{r}
+summary(mnewdata1)
+```
+Changed data frame to matrix to handle the following error: Error in hist.default(newdata2[, i], main = colnames(newdata2)[i], xlab = colnames(newdata2)[i], : 'x' must be numeric
+```{r}
+mnewdata2 <-as.matrix(sapply(mnewdata1, as.numeric))
+```
+
+Analyze the distribution of each independent variable
+```{r}
+par(mfrow = c(2,2))
+for( i in 1:4){
+  hist(mnewdata2[,i], main = colnames(mnewdata2)[i],xlab=colnames(mnewdata2)[i], col = 'yellow')
+}
+```
+For continuous independent variables, we can get more clarity on the distribution by analyzing it w.r.t. dependent variable.
+```{r}
+par(mfrow = c(2,2))
+boxplot(bill_length_mm~species, ylab="Bill Length (mm)", xlab= "Species", col="light blue",data = mnewdata1)
+boxplot(bill_depth_mm~species, ylab="Bill Depth (mm)", xlab= "Species", col="light blue",data = mnewdata1)
+boxplot(flipper_length_mm~species, ylab="Flipper Length (mm)", xlab= "Species", col="light blue",data = mnewdata1)
+boxplot(body_mass_g~species, ylab="Body Mass (g)", xlab= "Species", col="light blue",data = mnewdata1)
+```
+New data frame of relevant modeling variables.
+```{r}
+mnewdata4 <- mnewdata2[,c("species", "bill_length_mm", "bill_depth_mm", "flipper_length_mm", "body_mass_g")]
+```
+
+#b.
+Please be sure to evaluate the independent variables appropriately to fit your best parsimonious model. 
+
+```{r}
+library(nnet)
+```
+
+Implementation of Logistic Regression to predict the binary outcome — species in the dataset “newdata4”.
+```{r}
+multimodel<- multinom(species~.,data = mnewdata1)
+```
+## c.
+Please be sure to interpret your variables in the model.
+
+Analysis of Model Summary
+```{r}
+summary(multimodel)
+```
+A one-unit increase in the variable body mass(g) is associated with the decrease in the log odds of being Chinstrap species vs. Adelie in the amount of .013.
+A one-unit increase in the variable body mass(g) is associated with the increase in the log odds of being Gentoo species vs. Adelie in the amount of .001.
+A one-unit increase in the variable flipper length(mm) is associated with the decrease in the log odds of being Chinstrap species vs. Adelie in the amount of 2.644.
+A one-unit increase in the variable body mass(g) is associated with the decrease in the log odds of being Gentoo species vs. Adelie in the amount of 1.640.
+A one-unit increase in the variable bill depth(mm) is associated with the decrease in the log odds of being Chinstrap species vs. Adelie in the amount of 84.814.
+A one-unit increase in the variable bill depth(mm) is associated with the decrease in the log odds of being Gentoo species vs. Adelie in the amount of 91.604.
+A one-unit increase in the variable bill length(mm) is associated with the increase in the log odds of being Chinstrap species vs. Adelie in the amount of 58.945.
+A one-unit increase in the variable bill length(mm) is associated with the increase in the log odds of being Gentoo species vs. Adelie in the amount of 43.759.
+
+#4. Extra credit
+
+What would be some of the fit statistics you would want to evaluate for your model in question #3? Feel free to share whatever you can provide. (10)
+
+Naive Bayes computes the conditional a-posterior probabilities of a categorical class variable given independent predictor variables using the Bayes rule. Naive Bayes is a Supervised Machine Learning algorithm based on the Bayes Theorem that is used to solve classification problems by following a probabilistic approach. 
+```{r message=FALSE, comment=FALSE}
+library(naivebayes)
+library(e1071)
+nb_model <- naiveBayes(species ~ ., df_train)
+nb_model
+```
+```{r}
+nb_train_pred <- nb_model %>% 
+  #make prediction on training data
+  predict(df_train) %>%
+  data.frame(prediction = .) %>%
+  # merge the prediction result back to training data set
+  bind_cols(df_train)
+nb_train_pred
+```
+
+```{r}
+nb_train_cm <- nb_train_pred %>% 
+  #use only prediction values and actual label
+  dplyr::select(prediction, species) %>%
+  #construct confusion matrix
+  table() %>%
+  #display as matrix
+  as.matrix()
+nb_train_cm
+```
+```{r}
+nb_train_pred %>%
+  metrics(truth = species, estimate = prediction)
+```
+
+
+kNN k-nearest neighbour classification for test set from training set. For each row of the test set, the k nearest (in Euclidean distance) training set vectors are found, and the classification is decided by majority vote, with ties broken at random. If there are ties for the kth nearest vector, all candidates are included in the vote.
+```{r}
+# kNN model with k=3
+knn3_model <- nearest_neighbor(neighbors = 3) %>%
+  set_mode('classification') %>%
+  set_engine('kknn') %>%
+  fit(species ~ ., df_train)
+
+knn3_model
+```
+```{r}
+knn3_train_pred <- knn3_model %>% 
+  #make prediction on training data
+  predict(df_train) %>%
+  rename(prediction = `.pred_class`) %>%
+  # merge the prediction result back to training data set
+  bind_cols(df_train)
+```
+
+```{r}
+knn3_train_cm <- knn3_train_pred %>% 
+  #use only prediction values and actual label
+  dplyr::select(prediction, species) %>%
+  #construct confusion matrix
+  table() %>%
+  #display as matrix
+  as.matrix()
+knn3_train_cm
+```
+```{r}
+knn3_train_pred %>%
+  metrics(truth = species, estimate = prediction)
+```
+
+
+# Refrences
+https://stackoverflow.com/questions/16518428/right-way-to-convert-data-frame-to-a-numeric-matrix-when-df-also-contains-strin
+https://stackoverflow.com/questions/24111835/incorrect-number-of-dimensions-and-incorrect-number-of-subscripts-in-array
+http://www.sthda.com/english/wiki/reordering-data-frame-columns-in-r
+https://towardsdatascience.com/implementing-binary-logistic-regression-in-r-7d802a9d98fe
+http://r-statistics.co/Multinomial-Regression-With-R.html
+https://stats.idre.ucla.edu/r/dae/multinomial-logistic-regression/
+https://datasciencebeginners.com/2018/12/20/multinomial-logistic-regression-using-r/
+https://www.rdocumentation.org/packages/e1071/versions/1.7-3/topics/naiveBayes
+https://towardsdatascience.com/k-nearest-neighbors-algorithm-with-examples-in-r-simply-explained-knn-1f2c88da405c
+https://www.rdocumentation.org/packages/class/versions/7.3-17/topics/knn
+
